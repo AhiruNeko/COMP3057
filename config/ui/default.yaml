@@ -1,0 +1,62 @@
+data_config: config/data/default.yaml
+app:
+  title: Patch Reconstruction Demo
+  host: 127.0.0.1
+  port: 7860
+  share: false
+  open_browser: false
+  max_file_size: 20mb
+runtime:
+  device: auto
+  cpu_threads: 4
+  seed: 968861758
+  random_seed: true
+visualization:
+  image_display_size: 384
+  patch_display_size: 256
+mask:
+  x: 31
+  y: 59
+  size: 16
+  display_color:
+  - 128
+  - 128
+  - 128
+  outline_color:
+  - 255
+  - 59
+  - 48
+sampling:
+  steps: 64
+  max_steps: 100
+default_method: baseline
+methods:
+  baseline:
+    label: Baseline (nearest neighbour)
+    kind: baseline
+  basic:
+    label: Model (basic)
+    kind: model
+    checkpoint: null
+    use_transformer: false
+    use_film: false
+  module1:
+    label: Model + Module 1 (Transformer)
+    kind: model
+    checkpoint: null
+    use_transformer: true
+    use_film: false
+  module2:
+    label: Model + Module 2 (FiLM)
+    kind: model
+    checkpoint: null
+    use_transformer: false
+    use_film: true
+  both:
+    label: Model + Modules 1 and 2
+    kind: model
+    checkpoint: outputs/train/transformer_film/20261119_165910_931870/best.pt
+    use_transformer: true
+    use_film: true
+output:
+  root: outputs/ui

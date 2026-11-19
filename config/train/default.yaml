@@ -1,0 +1,37 @@
+# Paths are relative to the project root, not the current working directory.
+# Data settings live only in config/data/default.yaml (shared with eval).
+seed: 42
+device: auto  # auto, cpu, cuda, cuda:0
+cpu_threads: 4
+
+model:
+  base_channels: 32
+  context_dim: 128
+  time_dim: 128
+  use_transformer: true  # Module 1
+  use_film: true         # Module 2
+  transformer_heads: 4
+  transformer_layers: 4
+  transformer_dropout: 0.1
+  max_context_grid: 16
+  mask_fill_value: 0.0
+
+training:
+  epochs: 50
+  batch_size: 16
+  masks_per_image: 20  # total masks per photograph in train and validation; validation masks stay fixed
+  num_workers: 0
+  learning_rate: 0.0001
+
+validation:
+  batch_size: 32
+  mse_every: 5  # also measure on first and final epochs
+  sampling_steps: 16
+  preview_images: 4
+
+output:
+  root: outputs/train
+  name: null  # inferred from module flags
+  progress: true
+  tensorboard: false
+

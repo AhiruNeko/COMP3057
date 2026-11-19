@@ -1,0 +1,42 @@
+# Shared by train, eval and UI. No file lists or cached split manifests.
+# Split each selected dataset independently, then combine matching partitions.
+seed: 42
+image_size: 256  # longest side after aspect-preserving resize; no crop/stretch
+mask_sizes: [16, 32]
+
+# Run download_data.py explicitly before training; download missing files only.
+download:
+  output_root: outputs/downloads
+  timeout: 30
+  retries: 3
+  workers: 4
+  user_agent: "COMP3057Proj/1.0 (educational dataset downloader)"
+
+datasets:
+  wikimedia:
+    path: dataset/wikimedia
+    source_url: https://commons.wikimedia.org/wiki/Category:Hong_Kong_skylines_(Hong_Kong_Island)
+    download:
+      provider: wikimedia
+      api_url: https://commons.wikimedia.org/w/api.php
+      category: "Category:Hong Kong skylines (Hong Kong Island)"
+      thumbnail_width: 1280
+      expected_count: 278
+      manifest: outputs/downloads/manifests/wikimedia.json
+    train_fraction: 0.70
+    val_fraction: 0.15
+    test_fraction: 0.15
+#  openimage:
+#    path: dataset/openimage
+#    source_url: https://storage.googleapis.com/openimages/web/download_v7.html
+#    download:
+#      provider: openimages
+#      source_split: train  # upstream split, unrelated to our local train/val/test
+#      image_ids_url: https://storage.googleapis.com/openimages/2018_04/train/train-images-boxable-with-rotation.csv
+#      image_url_template: "https://open-images-dataset.s3.amazonaws.com/{split}/{image_id}.jpg"
+#      expected_count: 5000
+#      selection_seed: 42
+#      manifest: outputs/downloads/manifests/openimage.json
+#    train_fraction: 0.70
+#    val_fraction: 0.15
+#    test_fraction: 0.15
