@@ -2,7 +2,7 @@
 # Split each selected dataset independently, then combine matching partitions.
 seed: 42
 image_size: 256  # longest side after aspect-preserving resize; no crop/stretch
-mask_sizes: [16, 32]
+mask_sizes: [32, 64]
 
 # Run download_data.py explicitly before training; download missing files only.
 download:

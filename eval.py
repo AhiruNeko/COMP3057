@@ -72,6 +72,8 @@ def _write_summary(path, report, config, counts, model_config):
         f'Checkpoint epoch: {report["checkpoint_epoch"]}',
         f'Transformer: {model_config["use_transformer"]} | FiLM: {model_config["use_film"]}',
         f'Data config: {config["data_config"]}',
+        f'Training mask sizes: {report["training_mask_sizes"]}',
+        f'Evaluation mask sizes: {report["mask_sizes"]}',
         f'Split: {report["split"]} | Seed: {report["seed"]} | Device: {report["device"]}',
         f'Photos: {counts["total"][report["split"]]} | Masked examples: {examples}',
         f'Masks per photograph: {options["masks_per_image"]} (total across mask sizes)',
@@ -207,8 +209,14 @@ def evaluate(config):
     # The current training format contains only weights and plain metadata.
     checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=True)
     settings = load_data_config(config['data_config'])
-    if data_rules(settings) != data_rules(checkpoint['data_config']):
-        raise ValueError('Shared data config differs from training; use the original rules to preserve held-out sets')
+    evaluation_rules = data_rules(settings)
+    training_rules = data_rules(checkpoint['data_config'])
+    # Mask size is an evaluation condition, not part of the photo split or
+    # model architecture. Keep all other input/split safeguards unchanged.
+    evaluation_rules.pop('mask_sizes')
+    training_rules.pop('mask_sizes')
+    if evaluation_rules != training_rules:
+        raise ValueError('Data split/input rules differ from training; only mask_sizes may change')
     model_config = checkpoint['config']['model']
     model = UNetFlowMatching(**model_config).to(device)
     model.load_state_dict(checkpoint['model'], strict=True)
@@ -312,6 +320,8 @@ def evaluate(config):
         summary = _summarize(rows, source_names, settings['mask_sizes'], use_baseline)
         report = {'checkpoint': str(checkpoint_path), 'checkpoint_epoch': checkpoint['epoch'],
                   'split': options['split'], 'seed': config['seed'], 'device': str(device),
+                  'training_mask_sizes': list(checkpoint['data_config']['mask_sizes']),
+                  'mask_sizes': list(settings['mask_sizes']),
                   'masks_per_image': options['masks_per_image'],
                   'metric_range': 'RGB [-1,1]; squared errors only inside square; per-image mean, then per-size mean',
                   'baseline': {'method': 'nearest_neighbour', 'distance': 'euclidean',

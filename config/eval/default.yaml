@@ -1,6 +1,7 @@
 # Set the exact weight file to evaluate. Paths are relative to the project root.
-checkpoint: outputs/train/transformer_film/20261119_165910_931870/best.pt  # e.g. outputs/train/basic/<run>/best.pt
-data_config: config/data/default.yaml
+# checkpoint: outputs/train/transformer_film/20261120_022102_761532/best.pt  # e.g. outputs/train/basic/<run>/best.pt
+checkpoint: outputs/train/basic/20261120_121132_744168/best.pt
+data_config: config/data/default.yaml  # mask_sizes here may differ from checkpoint training sizes
 seed: 42  # reconstruction noise; split/mask seed remains in the shared data config
 device: auto
 cpu_threads: 4
@@ -8,9 +9,9 @@ cpu_threads: 4
 evaluation:
   masks_per_image: 5  # total fixed masks per photograph; sizes assigned cyclically
   split: test  # test or validation; never used to train/select weights here
-  batch_size: 32
+  batch_size: 8
   num_workers: 0
-  sampling_steps: 32
+  sampling_steps: 16
 
 baseline:
   # Nearest visible pixel interpolation; no iterative parameters.

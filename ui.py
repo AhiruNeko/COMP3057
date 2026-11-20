@@ -30,13 +30,6 @@ from randomness import seed_everything
 UI_OUTPUT_ROOT = resolve_path('outputs/ui')
 
 
-def trajectory_steps(steps):
-    """Show all completed steps up to 16, otherwise sample at steps/16."""
-    steps = integer(steps, 'Sampling steps', 1)
-    count = min(steps, 16)
-    return [math.ceil(index * steps / count) for index in range(1, count + 1)]
-
-
 def save_settings(path, config, side, method, x, y, size, steps, seed, random_seed):
     """Update only editable UI defaults; preserve other on-disk settings."""
     size = integer(size, 'Mask size', 1, side - 1)
@@ -199,6 +192,20 @@ class ReconstructionDemo:
         dimensions = tuple(max(1, round(value * scale)) for value in image.size)
         return image.resize(dimensions, Image.Resampling.NEAREST)
 
+    def trajectory_preview(self, step, trajectory):
+        """Display one cached sampling state; never run the model again."""
+        if not trajectory:
+            return None, 'No Flow Matching trajectory. Run a neural reconstruction first.'
+        step = integer(step, 'Trajectory step', 0, trajectory['steps'])
+        with Image.open(trajectory['original']) as source:
+            frame = source.convert('RGB')
+        with Image.open(trajectory['patches'][step]) as patch:
+            frame.paste(patch.convert('RGB'), (trajectory['x'], trajectory['y']))
+        caption = f'Step {step}/{trajectory["steps"]} | t = {step / trajectory["steps"]:.3f}'
+        if step == 0:
+            caption += ' | Initial noise'
+        return self.display(frame), caption
+
     def method_status(self, key):
         method = self.config['methods'][key]
         if method['kind'] == 'baseline':
@@ -263,12 +270,12 @@ class ReconstructionDemo:
         method = self.config['methods'][key]
         source = source or {'kind': 'upload'}
         trajectory = []
-        selected_steps = set(trajectory_steps(steps))
 
         def capture(step, state):
-            if step in selected_steps:
-                display_state = model.denormalize_image(state)[:, :, :image.height, :image.width]
-                trajectory.append((step, display_state[0].cpu().permute(1, 2, 0).numpy()))
+            # Cache every actual step, but only the patch, keeping memory/storage bounded.
+            patch = model.denormalize_image(state[0, :, y:y + size, x:x + size])
+            pixels = patch.cpu().permute(1, 2, 0).numpy()
+            trajectory.append((step, np.rint(np.clip(pixels, 0, 1) * 255).astype(np.uint8)))
 
         with self._lock:
             seed_everything(seed)
@@ -309,14 +316,15 @@ class ReconstructionDemo:
         original_patch, result_patch = image.crop(box), result.crop(box)
         original_patch.save(directory / 'original_patch.png')
         result_patch.save(directory / 'reconstructed_patch.png')
-        frames = []
-        for step, state_pixels in trajectory:
-            frame_pixels = original.copy()
-            frame_pixels[y:y + size, x:x + size] = np.rint(
-                np.clip(state_pixels[y:y + size, x:x + size], 0, 1) * 255).astype(np.uint8)
-            frame = Image.fromarray(frame_pixels)
-            frame.save(directory / f'flow_step_{step:04d}.png')
-            frames.append((self.display(frame), f'Step {step}/{steps} | t = {step / steps:.3f}'))
+        frames = None
+        if trajectory:
+            patch_paths = []
+            for step, patch_pixels in trajectory:
+                path = directory / f'flow_patch_step_{step:04d}.png'
+                Image.fromarray(patch_pixels).save(path)
+                patch_paths.append(str(path))
+            frames = {'original': str(directory / 'original.png'), 'patches': patch_paths,
+                      'x': x, 'y': y, 'steps': steps}
         record = {'method': key, 'label': method['label'], 'source': source,
                   'checkpoint': method.get('checkpoint'), 'seed': seed, 'random_seed': random_seed,
                   'image_size': self.side, 'width': image.width, 'height': image.height,
@@ -346,6 +354,7 @@ def build_app(config, config_path=None):
                     'Observed pixels outside the square are preserved exactly at this resolution.')
         current = gr.State(None)
         source_state = gr.State({'kind': 'upload'})
+        trajectory_state = gr.State(None)
         with gr.Row():
             with gr.Column():
                 with gr.Tabs():
@@ -394,13 +403,15 @@ def build_app(config, config_path=None):
                     result_patch = gr.Image(label='Reconstructed patch', type='pil', interactive=False,
                                             height=config['visualization']['patch_display_size'])
             with gr.Tab('Flow Matching trajectory'):
-                gr.Markdown('Actual ODE sampling states from the same reconstruction. At most 16 completed steps '
-                            'are shown: every step when steps <= 16, otherwise at intervals of steps / 16 '
-                            '(rounded up to whole steps), always including the final result. '
+                gr.Markdown('Drag the step slider to inspect any state from the same reconstruction, '
+                            'including initial noise (step 0) and the final result. No new inference is performed. '
                             'Display values are clipped to [0, 1]; sampling states are not. '
                             'The baseline has no Flow Matching trajectory.')
-                trajectory_gallery = gr.Gallery(label='Noise to reconstruction', columns=4, type='pil',
-                                                object_fit='contain', height=500)
+                flow_step = gr.Slider(0, 1, value=0, step=1, precision=0, interactive=False,
+                                      label='Trajectory step')
+                flow_image = gr.Image(label='Sampling state', type='pil', format='png', interactive=False,
+                                      buttons=['fullscreen'], height=config['visualization']['image_display_size'])
+                flow_status = gr.Markdown('Run a neural reconstruction to inspect its sampling trajectory.')
         gr.Markdown('Models are loaded lazily from separate checkpoints. This demo never trains models. '
                     'GPU inference may compete with a running training job; use runtime.device: cpu if needed.')
 
@@ -408,14 +419,18 @@ def build_app(config, config_path=None):
             mask_x, mask_y, mask_size = backend.clamp_mask(image, mask_x, mask_y, mask_size)
             return (image, source, backend.preview(image, mask_x, mask_y, mask_size),
                     f'{message} | Working image: {image.width} x {image.height}.',
-                    None, None, '', None, None, [],
+                    None, None, '', None, None, None,
+                    gr.Slider(minimum=0, maximum=1, value=0, interactive=False), None,
+                    'Run a neural reconstruction to inspect its sampling trajectory.',
                     gr.Slider(maximum=image.width - mask_size, value=mask_x),
                     gr.Slider(maximum=image.height - mask_size, value=mask_y),
                     gr.Slider(maximum=min(image.size) - 1, value=mask_size))
 
         def use_upload(image, mask_x, mask_y, mask_size):
             if image is None:
-                return (None, {'kind': 'upload'}, None, 'No photograph loaded.', None, None, '', None, None, [],
+                return (None, {'kind': 'upload'}, None, 'No photograph loaded.', None, None, '', None, None, None,
+                        gr.Slider(minimum=0, maximum=1, value=0, interactive=False), None,
+                        'Run a neural reconstruction to inspect its sampling trajectory.',
                         gr.skip(), gr.skip(), gr.skip())
             image = backend.photograph(image)
             return loaded_result(image, {'kind': 'upload'}, 'Active input: uploaded photograph.', mask_x, mask_y, mask_size)
@@ -458,8 +473,13 @@ def build_app(config, config_path=None):
                     with backend._lock:
                         save_settings(config_path, backend.config, backend.side, chosen_method,
                                       mask_x, mask_y, mask_size, sample_steps, actual_seed, randomize)
+                trajectory = result['trajectory']
+                last_step = trajectory['steps'] if trajectory else 0
+                frame, caption = backend.trajectory_preview(last_step, trajectory)
                 return (backend.display(result['masked']), backend.display(result['reconstructed']),
-                        result['status'], result['original_patch'], result['result_patch'], result['trajectory'], actual_seed)
+                        result['status'], result['original_patch'], result['result_patch'], trajectory,
+                        gr.Slider(minimum=0, maximum=max(1, last_step), value=last_step, interactive=bool(trajectory)),
+                        frame, caption, actual_seed)
             except (ValueError, OSError, RuntimeError, KeyError) as exc:
                 raise gr.Error(str(exc)) from exc
 
@@ -473,7 +493,7 @@ def build_app(config, config_path=None):
                 raise gr.Error(f'Could not save UI settings: {exc}') from exc
 
         load_outputs = [current, source_state, preview, source_status, masked_output, reconstructed_output, status,
-                        original_patch, result_patch, trajectory_gallery, x, y, size]
+                        original_patch, result_patch, trajectory_state, flow_step, flow_image, flow_status, x, y, size]
         upload.change(use_upload, [upload, x, y, size], load_outputs)
         dataset_name.change(choices, dataset_name, photo_choice)
         load_photo.click(use_dataset, [dataset_name, photo_choice, x, y, size], load_outputs)
@@ -482,13 +502,16 @@ def build_app(config, config_path=None):
         y.change(backend.preview, [current, x, y, size], preview)
         size.input(resize_mask, [size, x, y, current], [x, y, size, preview])
         preview.select(click_mask, [current, size], [x, y, preview])
+        flow_step.input(backend.trajectory_preview, [flow_step, trajectory_state], [flow_image, flow_status],
+                        queue=False, show_progress='hidden', trigger_mode='always_last')
         if config_path is not None:
             settings_inputs = [method, x, y, size, steps, seed, random_seed]
             for control in settings_inputs:
                 control.change(persist, settings_inputs, settings_status, concurrency_limit=1,
                                concurrency_id='save_ui_settings')
         run.click(predict, [current, source_state, method, x, y, size, steps, seed, random_seed],
-                  [masked_output, reconstructed_output, status, original_patch, result_patch, trajectory_gallery, seed],
+                  [masked_output, reconstructed_output, status, original_patch, result_patch,
+                   trajectory_state, flow_step, flow_image, flow_status, seed],
                   concurrency_limit=1)
     app.queue(default_concurrency_limit=1)
     return app, backend

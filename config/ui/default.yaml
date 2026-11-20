@@ -10,14 +10,14 @@ runtime:
   device: auto
   cpu_threads: 4
   seed: 968861758
-  random_seed: true
+  random_seed: false
 visualization:
   image_display_size: 384
   patch_display_size: 256
 mask:
-  x: 31
-  y: 59
-  size: 16
+  x: 94
+  y: 35
+  size: 32
   display_color:
   - 128
   - 128
@@ -27,7 +27,7 @@ mask:
   - 59
   - 48
 sampling:
-  steps: 64
+  steps: 16
   max_steps: 100
 default_method: baseline
 methods:
@@ -55,7 +55,7 @@ methods:
   both:
     label: Model + Modules 1 and 2
     kind: model
-    checkpoint: outputs/train/transformer_film/20261119_165910_931870/best.pt
+    checkpoint: outputs/train/transformer_film/20261120_022102_761532/best.pt
     use_transformer: true
     use_film: true
 output:

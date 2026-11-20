@@ -1,6 +1,8 @@
 """Config-driven training for all four conditional U-Net FM ablations.
 
 Usage: python train.py --config config/train/default.yaml
+       python train.py --use-transformer false --use-film true
+       python train.py --set training.epochs=100 training.learning_rate=5e-5
 Training settings and shared data settings use separate YAML/JSON files.
 Test images are never evaluated
 here. Return value includes history; plots use the generic utils.line_plot.
@@ -15,6 +17,7 @@ import time
 from zoneinfo import ZoneInfo
 
 import torch
+import yaml
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
@@ -277,12 +280,65 @@ def train(config, data_config=None):
             handler.close()
 
 
-def main():
+def apply_overrides(config, overrides):
+    """Return a copied config with existing dotted keys replaced by YAML values."""
+    config = copy.deepcopy(config)
+    for override in overrides:
+        key, separator, raw = override.partition('=')
+        if not separator or not key or not raw.strip():
+            raise ValueError(f'Expected KEY=VALUE, got {override!r}')
+        parts = key.split('.')
+        target = config
+        for part in parts[:-1]:
+            if not isinstance(target, dict) or part not in target:
+                raise ValueError(f'Unknown configuration key: {key}')
+            target = target[part]
+        if not isinstance(target, dict) or parts[-1] not in target:
+            raise ValueError(f'Unknown configuration key: {key}')
+        previous = target[parts[-1]]
+        value = yaml.safe_load(raw)
+        # YAML 1.1 can parse scientific notation such as 5e-5 as a string.
+        if isinstance(previous, float) and isinstance(value, str):
+            try:
+                value = float(value)
+            except ValueError:
+                pass
+        if previous is not None:
+            valid = (isinstance(value, (int, float)) and not isinstance(value, bool)
+                     if isinstance(previous, float) else type(value) is type(previous))
+            if not valid:
+                raise ValueError(f'{key} must have type {type(previous).__name__}')
+        target[parts[-1]] = value
+    return config
+
+
+def _boolean(value):
+    if value.lower() not in ('true', 'false'):
+        raise argparse.ArgumentTypeError('Use true or false')
+    return value.lower() == 'true'
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', default='config/train/default.yaml', help='YAML/JSON configuration file')
     parser.add_argument('--data-config', default=DEFAULT_DATA_CONFIG, help='Shared train/eval data configuration')
-    args = parser.parse_args()
-    train(load_config(args.config), load_data_config(args.data_config))
+    parser.add_argument('--set', dest='overrides', action='extend', nargs='+', default=[],
+                        metavar='KEY=VALUE', help='Override existing training config keys, e.g. training.epochs=100')
+    parser.add_argument('--use-transformer', type=_boolean, default=None,
+                        help='Override model.use_transformer (true/false); takes precedence over --set')
+    parser.add_argument('--use-film', type=_boolean, default=None,
+                        help='Override model.use_film (true/false); takes precedence over --set')
+    args = parser.parse_args(argv)
+    try:
+        config = apply_overrides(read_config(args.config), args.overrides)
+        for name in ('use_transformer', 'use_film'):
+            value = getattr(args, name)
+            if value is not None:
+                config['model'][name] = value
+        validate_config(config)
+    except (ValueError, TypeError, KeyError, yaml.YAMLError) as error:
+        parser.error(str(error))
+    train(config, load_data_config(args.data_config))
 
 
 if __name__ == '__main__':
